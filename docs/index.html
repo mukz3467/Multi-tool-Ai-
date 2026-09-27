@@ -14,82 +14,26 @@ small{color:#71869b}
 <body><main class="wrap">
 <span class="badge">PERSONAL • REMOTE GPU</span>
 <h1>2Dify AI</h1>
-<p class="sub">Real video-to-video AI workflow. Your phone is only the control panel; the heavy generation runs remotely.</p>
-
+<p class="sub">Upload one video. The app automatically prepares the first-frame guide and sends the job to a remote GPU. Your phone does not perform the heavy generation.</p>
 <div class="card">
-<label>1. Source video</label><input id="video" type="file" accept="video/*">
-<label>2. Fully-2D style frame</label><input id="frame" type="file" accept="image/png,image/jpeg,image/webp">
-<small>The ID-V2V model uses a stylized keyframe to define the target visual world.</small>
-<label>3. Style</label>
+<label>1. Upload your video</label><input id="video" type="file" accept="video/*">
+<small>No separate keyframe upload. A target-style guide is prepared automatically from the first frame.</small>
+<label>2. 2D style</label>
 <select id="style"><option>Fully 2D Cartoon</option><option>Anime 2D</option><option>Hand Drawn 2D</option><option>Storybook 2D</option><option>Flat 2D</option><option>Comic 2D</option></select>
-<button id="start">Run Real AI 2D Conversion</button>
-<div id="status" class="status">Waiting for video and 2D keyframe.</div>
+<button id="start">🚀 Convert to Full 2D</button>
+<div id="status" class="status">Upload a video to begin.</div>
 <video id="result" class="result" controls hidden></video>
 <a id="download" hidden download="2dify-output.mp4"><button>Download MP4</button></a>
-<div class="warn">GPU processing is remote. GitHub Pages itself does not process video. The current public ID-V2V Space can be sleeping or unavailable; the app reports that state instead of showing fake progress.</div>
+<div class="warn">The heavy AI generation runs on a remote GPU. GitHub Pages is only the control panel. If the GPU Space is unavailable or queued, the app reports the real state instead of faking a result.</div>
 </div>
-
-<div class="card"><b>GPU worker</b><p class="sub">A Colab worker notebook is also stored in your repo for a temporary personal GPU route.</p>
-<a href="https://github.com/mukz3467/Multi-tool-Ai-/blob/main/2dify_ai/2Dify_AI_ID-V2V_Worker.ipynb" target="_blank" style="color:#67d7ff">Open worker notebook →</a></div>
-
+<div class="card"><b>How it works</b><p class="sub">Video → automatic first-frame guide → ID-V2V video-to-video generation → MP4 result. Audio preservation is attempted by the worker after generation.</p>
+<a href="https://github.com/mukz3467/Multi-tool-Ai-/blob/main/2dify_ai/2Dify_AI_ID-V2V_Worker.ipynb" target="_blank" style="color:#67d7ff">Open GPU worker notebook →</a></div>
 <script type="module">
 import { Client, handle_file } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
-
 const SPACE="hugging-apps/id-v2v";
-const video=document.getElementById("video"), frame=document.getElementById("frame");
-const style=document.getElementById("style"), start=document.getElementById("start");
-const status=document.getElementById("status"), result=document.getElementById("result"), download=document.getElementById("download");
-
-const promptFor=(s)=>`Fully 2D illustrated animation, ${s}. Convert every visible element into coherent 2D artwork: characters, faces, eyes, hair, clothes, hands, animals, vehicles, objects, buildings, plants, sky, ground, shadows, highlights, reflections and background. Preserve identity, expressions, gaze, body movement, interactions, lip-sync and camera timing. Clean 2D linework, flat illustrated shapes and hand-drawn/cartoon rendering. No photorealism, live-action texture, 3D geometry, CGI look, physically based materials, volumetric lighting or photographic skin/hair. The entire final frame must read as a 2D animated scene.`;
-
-function fileParam(p){
-  const c=(p.component||"").toLowerCase(), l=(p.label||"").toLowerCase();
-  return c.includes("video")||l.includes("video") ? handle_file(video.files[0]) :
-         c.includes("image")||l.includes("frame")||l.includes("keyframe") ? handle_file(frame.files[0]) : null;
-}
-function textParam(p){const l=(p.label||"").toLowerCase();return l.includes("prompt")||l.includes("description")||l.includes("style")?promptFor(style.value):null;}
-
-start.onclick=async()=>{
-  if(!video.files[0]||!frame.files[0]){status.textContent="Please select both the source video and a fully-2D keyframe.";return}
-  start.disabled=true; result.hidden=true; download.hidden=true;
-  try{
-    status.textContent="Connecting to remote GPU worker…";
-    const app=await Client.connect(SPACE,{space_status:(x)=>{status.textContent="GPU Space: "+(x.message||x.status)}});
-    const info=await app.view_api();
-    const endpoints=Object.entries(info.named_endpoints||{});
-    if(!endpoints.length) throw new Error("The GPU Space exposed no runnable API endpoint.");
-    const chosen=endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video")&&JSON.stringify(e).toLowerCase().includes("image"))||endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video"))||endpoints[0];
-    const [apiName,schema]=chosen;
-    const params=schema.parameters||[];
-    const payload=[];
-    for(const p of params){
-      const c=(p.component||"").toLowerCase();
-      let v=fileParam(p);
-      if(v===null && (c.includes("textbox")||c.includes("text"))) v=textParam(p)??promptFor(style.value);
-      if(v===null && c.includes("checkbox")) v=false;
-      if(v===null && (c.includes("number")||c.includes("slider"))) v=p.default??0;
-      if(v===null && c.includes("dropdown")) v=p.default??(p.enum?.[0]??null);
-      if(v===null) v=p.default??null;
-      payload.push(v);
-    }
-    status.textContent="Queued on remote GPU…\nEndpoint: "+apiName;
-    const job=app.submit(apiName,payload);
-    let finalData=null;
-    for await(const msg of job){
-      if(msg.type==="status"){
-        const s=msg;
-        status.textContent=(s.stage||"processing")+" — "+(s.position!=null?"queue position "+s.position:"")+" "+(s.message||"");
-      } else if(msg.type==="data"){finalData=msg.data}
-    }
-    if(!finalData) throw new Error("GPU returned no output.");
-    const flat=JSON.stringify(finalData);
-    const urls=[...flat.matchAll(/https?:[^"\\s]+/g)].map(m=>m[0].replace(/\\u0026/g,"&"));
-    const out=urls.find(u=>/\\.(mp4|webm|mov)(\\?|$)/i.test(u))||urls[0];
-    if(!out) throw new Error("GPU completed but no video URL was returned.");
-    result.src=out; result.hidden=false; download.href=out; download.hidden=false;
-    status.innerHTML="<span class='ok'>AI conversion completed.</span>";
-  }catch(e){
-    status.textContent="GPU conversion could not start: "+(e?.message||e)+"\n\nThe public ID-V2V Space may currently be unavailable or its API may have changed.";
-  }finally{start.disabled=false}
-};
+const video=document.getElementById("video"),style=document.getElementById("style"),start=document.getElementById("start"),status=document.getElementById("status"),result=document.getElementById("result"),download=document.getElementById("download");
+function guideFrame(file){return new Promise((resolve,reject)=>{const v=document.createElement("video"),c=document.createElement("canvas");v.muted=true;v.preload="auto";v.playsInline=true;v.onloadeddata=()=>{v.currentTime=0};v.onseeked=()=>{const w=Math.min(v.videoWidth||720,1280),h=Math.round(w*(v.videoHeight||720)/(v.videoWidth||720));c.width=w;c.height=h;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(v,0,0,w,h);const im=x.getImageData(0,0,w,h),d=im.data;for(let i=0;i<d.length;i+=4){d[i]=Math.round(d[i]/32)*32;d[i+1]=Math.round(d[i+1]/32)*32;d[i+2]=Math.round(d[i+2]/32)*32}x.putImageData(im,0,0);c.toBlob(b=>b?resolve(new File([b],"auto_2d_guide.png",{type:"image/png"})):reject(new Error("Could not prepare guide frame.")),"image/png")};v.onerror=()=>reject(new Error("Could not read the video."));v.src=URL.createObjectURL(file)})}
+const full2dPrompt=s=>`Fully 2D illustrated animation, ${s}. Convert EVERY visible element into coherent 2D artwork: characters, faces, eyes, hair, clothes, hands, animals, vehicles, objects, buildings, plants, sky, ground, shadows, highlights, reflections and background. Preserve source identity, expressions, gaze, body movement, interactions, lip-sync and camera timing. Use clean 2D linework, flat illustrated shapes and hand-drawn/cartoon rendering. No photorealism, no live-action texture, no 3D geometry, no CGI look, no physically based materials, no volumetric lighting, no realistic reflections, no photographic skin or hair. The entire final video must read as a 2D animated scene.`;
+function fileParam(p,guide){const q=((p.component||"")+" "+(p.label||"")).toLowerCase();if(q.includes("video"))return handle_file(video.files[0]);if(q.includes("image")||q.includes("frame")||q.includes("keyframe"))return handle_file(guide);return null}
+start.onclick=async()=>{if(!video.files[0]){status.textContent="Please upload a video first.";return}start.disabled=true;result.hidden=true;download.hidden=true;try{status.textContent="Preparing automatic 2D guide from first frame…";const guide=await guideFrame(video.files[0]);status.textContent="Connecting to remote GPU…";const app=await Client.connect(SPACE,{space_status:x=>{status.textContent="GPU Space: "+(x.message||x.status||"")}});const info=await app.view_api();const endpoints=Object.entries(info.named_endpoints||{});if(!endpoints.length)throw new Error("GPU Space exposed no runnable API endpoint.");const chosen=endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video")&&JSON.stringify(e).toLowerCase().includes("image"))||endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video"))||endpoints[0];const [apiName,schema]=chosen,params=schema.parameters||[],payload=[];for(const p of params){const q=((p.component||"")+" "+(p.label||"")).toLowerCase();let val=fileParam(p,guide);if(val===null&&(q.includes("prompt")||q.includes("description")||q.includes("style")))val=full2dPrompt(style.value);if(val===null&&q.includes("checkbox"))val=false;if(val===null&&(q.includes("number")||q.includes("slider")))val=p.default??0;if(val===null&&q.includes("dropdown"))val=p.default??(p.enum?.[0]??null);if(val===null)val=p.default??null;payload.push(val)}status.textContent="Queued on remote GPU…\nEndpoint: "+apiName;const job=app.submit(apiName,payload);let data=null;for await(const msg of job){if(msg.type==="status")status.textContent=(msg.stage||"processing")+" — "+(msg.position!=null?"queue position "+msg.position:"")+" "+(msg.message||"");if(msg.type==="data")data=msg.data}if(!data)throw new Error("GPU returned no output.");const flat=JSON.stringify(data),urls=[...flat.matchAll(/https?:[^"\\s]+/g)].map(m=>m[0].replace(/\\u0026/g,"&")),out=urls.find(u=>/\\.(mp4|webm|mov)(\\?|$)/i.test(u))||urls[0];if(!out)throw new Error("GPU completed but no video URL was returned.");result.src=out;result.hidden=false;download.href=out;download.hidden=false;status.innerHTML="<span class='ok'>AI conversion completed.</span>"}catch(e){status.textContent="Conversion could not start: "+(e?.message||e)+"\n\nThe remote ID-V2V Space may be unavailable, queued, or have changed its API."}finally{start.disabled=false}};
 </script></main></body></html>
