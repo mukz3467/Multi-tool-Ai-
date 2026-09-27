@@ -1,35 +1,95 @@
 <!doctype html>
-<html lang="en">
-<head>
+<html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>2Dify AI — Personal 2D Video Studio</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#070b12;color:#eaf2ff;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-.wrap{max-width:760px;margin:auto;padding:28px 16px}.card{background:#0d1420;border:1px solid #1d2b3d;border-radius:20px;padding:20px;margin:14px 0;box-shadow:0 12px 40px #0005}
-h1{font-size:30px;margin:0 0 6px}p{color:#9eb0c5;line-height:1.55}.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#10263a;color:#67d7ff;font-size:12px}
-input[type=file]{width:100%;padding:18px;border:1px dashed #31506b;border-radius:14px;background:#09111b;color:#b9c8d8}
-select,button{width:100%;padding:14px;border-radius:12px;border:1px solid #29445c;background:#111d2b;color:#eef7ff;margin-top:10px}
-button{background:#0b8bd3;border:0;font-weight:700;cursor:pointer}button:disabled{opacity:.5}
-.status{font-size:14px;color:#9eb0c5;margin-top:12px}.warn{font-size:13px;color:#ffc66d;background:#211a0d;padding:12px;border-radius:12px;margin-top:12px}
-</style>
-</head>
+.wrap{max-width:760px;margin:auto;padding:24px 16px}.card{background:#0d1420;border:1px solid #1d2b3d;border-radius:20px;padding:20px;margin:14px 0}
+h1{font-size:30px;margin:0 0 6px}.sub{color:#9eb0c5;line-height:1.5}.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#10263a;color:#67d7ff;font-size:12px}
+label{display:block;margin-top:14px;font-weight:650;font-size:14px}input[type=file],select,button{width:100%;padding:14px;border-radius:12px;border:1px solid #29445c;background:#111d2b;color:#eef7ff;margin-top:8px}
+button{background:#0b8bd3;border:0;font-weight:700;cursor:pointer}button:disabled{opacity:.45}.status{font-size:14px;color:#a9bdd2;margin-top:12px;white-space:pre-wrap}
+.ok{color:#79e2a5}.warn{font-size:13px;color:#ffc66d;background:#211a0d;padding:12px;border-radius:12px;margin-top:12px}.result{width:100%;margin-top:14px;border-radius:14px}
+small{color:#71869b}
+</style></head>
 <body><main class="wrap">
-<span class="badge">PERSONAL • MOBILE-FIRST</span>
-<h1>2Dify AI</h1><p>Real AI video-to-video 2D workflow. Your phone is only the control panel; GPU processing happens remotely.</p>
+<span class="badge">PERSONAL • REMOTE GPU</span>
+<h1>2Dify AI</h1>
+<p class="sub">Real video-to-video AI workflow. Your phone is only the control panel; the heavy generation runs remotely.</p>
+
 <div class="card">
-<h2>Convert video</h2>
-<input id="video" type="file" accept="video/*">
-<select id="style"><option>Fully 2D Cartoon</option><option>Anime 2D</option><option>Hand Drawn</option><option>Storybook 2D</option><option>Flat 2D</option><option>Comic 2D</option></select>
-<button id="start">Prepare AI render</button>
-<div id="status" class="status">Waiting for video.</div>
-<div class="warn">The GitHub Pages front end does not use your phone's GPU. A separate GPU worker is required for actual ID-V2V generation. This page never pretends a browser filter is AI.</div>
+<label>1. Source video</label><input id="video" type="file" accept="video/*">
+<label>2. Fully-2D style frame</label><input id="frame" type="file" accept="image/png,image/jpeg,image/webp">
+<small>The ID-V2V model uses a stylized keyframe to define the target visual world.</small>
+<label>3. Style</label>
+<select id="style"><option>Fully 2D Cartoon</option><option>Anime 2D</option><option>Hand Drawn 2D</option><option>Storybook 2D</option><option>Flat 2D</option><option>Comic 2D</option></select>
+<button id="start">Run Real AI 2D Conversion</button>
+<div id="status" class="status">Waiting for video and 2D keyframe.</div>
+<video id="result" class="result" controls hidden></video>
+<a id="download" hidden download="2dify-output.mp4"><button>Download MP4</button></a>
+<div class="warn">GPU processing is remote. GitHub Pages itself does not process video. The current public ID-V2V Space can be sleeping or unavailable; the app reports that state instead of showing fake progress.</div>
 </div>
-<div class="card"><h3>GPU worker</h3><p>The worker notebook is stored in the project repository. It connects to the official ID-V2V hosted Space and is designed for temporary remote processing.</p>
-<a href="https://github.com/mukz3467/Multi-tool-Ai-/blob/main/2dify_ai/2Dify_AI_ID-V2V_Worker.ipynb" target="_blank" style="color:#67d7ff">Open GPU worker notebook →</a>
-</div>
-<script>
-const v=document.getElementById('video'),s=document.getElementById('status'),b=document.getElementById('start');
-b.onclick=()=>{if(!v.files[0]){s.textContent='Select a video first.';return}
-s.textContent='Video selected: '+v.files[0].name+' • '+(v.files[0].size/1048576).toFixed(1)+' MB. Remote GPU render must be started from the worker.';
+
+<div class="card"><b>GPU worker</b><p class="sub">A Colab worker notebook is also stored in your repo for a temporary personal GPU route.</p>
+<a href="https://github.com/mukz3467/Multi-tool-Ai-/blob/main/2dify_ai/2Dify_AI_ID-V2V_Worker.ipynb" target="_blank" style="color:#67d7ff">Open worker notebook →</a></div>
+
+<script type="module">
+import { Client, handle_file } from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+
+const SPACE="hugging-apps/id-v2v";
+const video=document.getElementById("video"), frame=document.getElementById("frame");
+const style=document.getElementById("style"), start=document.getElementById("start");
+const status=document.getElementById("status"), result=document.getElementById("result"), download=document.getElementById("download");
+
+const promptFor=(s)=>`Fully 2D illustrated animation, ${s}. Convert every visible element into coherent 2D artwork: characters, faces, eyes, hair, clothes, hands, animals, vehicles, objects, buildings, plants, sky, ground, shadows, highlights, reflections and background. Preserve identity, expressions, gaze, body movement, interactions, lip-sync and camera timing. Clean 2D linework, flat illustrated shapes and hand-drawn/cartoon rendering. No photorealism, live-action texture, 3D geometry, CGI look, physically based materials, volumetric lighting or photographic skin/hair. The entire final frame must read as a 2D animated scene.`;
+
+function fileParam(p){
+  const c=(p.component||"").toLowerCase(), l=(p.label||"").toLowerCase();
+  return c.includes("video")||l.includes("video") ? handle_file(video.files[0]) :
+         c.includes("image")||l.includes("frame")||l.includes("keyframe") ? handle_file(frame.files[0]) : null;
+}
+function textParam(p){const l=(p.label||"").toLowerCase();return l.includes("prompt")||l.includes("description")||l.includes("style")?promptFor(style.value):null;}
+
+start.onclick=async()=>{
+  if(!video.files[0]||!frame.files[0]){status.textContent="Please select both the source video and a fully-2D keyframe.";return}
+  start.disabled=true; result.hidden=true; download.hidden=true;
+  try{
+    status.textContent="Connecting to remote GPU worker…";
+    const app=await Client.connect(SPACE,{space_status:(x)=>{status.textContent="GPU Space: "+(x.message||x.status)}});
+    const info=await app.view_api();
+    const endpoints=Object.entries(info.named_endpoints||{});
+    if(!endpoints.length) throw new Error("The GPU Space exposed no runnable API endpoint.");
+    const chosen=endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video")&&JSON.stringify(e).toLowerCase().includes("image"))||endpoints.find(([n,e])=>JSON.stringify(e).toLowerCase().includes("video"))||endpoints[0];
+    const [apiName,schema]=chosen;
+    const params=schema.parameters||[];
+    const payload=[];
+    for(const p of params){
+      const c=(p.component||"").toLowerCase();
+      let v=fileParam(p);
+      if(v===null && (c.includes("textbox")||c.includes("text"))) v=textParam(p)??promptFor(style.value);
+      if(v===null && c.includes("checkbox")) v=false;
+      if(v===null && (c.includes("number")||c.includes("slider"))) v=p.default??0;
+      if(v===null && c.includes("dropdown")) v=p.default??(p.enum?.[0]??null);
+      if(v===null) v=p.default??null;
+      payload.push(v);
+    }
+    status.textContent="Queued on remote GPU…\nEndpoint: "+apiName;
+    const job=app.submit(apiName,payload);
+    let finalData=null;
+    for await(const msg of job){
+      if(msg.type==="status"){
+        const s=msg;
+        status.textContent=(s.stage||"processing")+" — "+(s.position!=null?"queue position "+s.position:"")+" "+(s.message||"");
+      } else if(msg.type==="data"){finalData=msg.data}
+    }
+    if(!finalData) throw new Error("GPU returned no output.");
+    const flat=JSON.stringify(finalData);
+    const urls=[...flat.matchAll(/https?:[^"\\s]+/g)].map(m=>m[0].replace(/\\u0026/g,"&"));
+    const out=urls.find(u=>/\\.(mp4|webm|mov)(\\?|$)/i.test(u))||urls[0];
+    if(!out) throw new Error("GPU completed but no video URL was returned.");
+    result.src=out; result.hidden=false; download.href=out; download.hidden=false;
+    status.innerHTML="<span class='ok'>AI conversion completed.</span>";
+  }catch(e){
+    status.textContent="GPU conversion could not start: "+(e?.message||e)+"\n\nThe public ID-V2V Space may currently be unavailable or its API may have changed.";
+  }finally{start.disabled=false}
 };
 </script></main></body></html>
