@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2Dify AI</title>
+<style>
+body{margin:0;background:#070b12;color:#eef6ff;font-family:system-ui;text-align:center}
+main{max-width:700px;margin:auto;padding:28px 16px}
+.box{background:#0d1420;border:1px solid #24384d;border-radius:22px;padding:20px;margin:18px 0}
+h1{font-size:32px;margin:8px}.muted{color:#9eb0c5}
+input,button{width:100%;padding:16px;margin-top:12px;border-radius:14px;border:1px solid #29445c;background:#111d2b;color:white}
+button{background:#078bd2;border:0;font-weight:700}
+video{width:100%;border-radius:16px;margin-top:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>🎨 2Dify AI</h1>
+<p class="muted">Real video → 2D animation</p>
+<section class="box">
+<h2>📤 INPUT VIDEO</h2>
+<input id="input" type="file" accept="video/*">
+<button id="go">Convert to 2D</button>
+<p id="status" class="muted">Choose one video.</p>
+</section>
+<section class="box">
+<h2>🎬 OUTPUT VIDEO</h2>
+<video id="out" controls hidden></video>
+<a id="download" hidden download="2dify-2d.mp4"><button>Download 2D Video</button></a>
+<p class="muted">The output area stays empty until a real GPU result is returned.</p>
+</section>
+</main>
+<script type="module">
+import {Client,handle_file} from "https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js";
+
+const input=document.getElementById("input");
+const go=document.getElementById("go");
+const status=document.getElementById("status");
+const out=document.getElementById("out");
+const download=document.getElementById("download");
+
+const SPACES=[
+  "witcherderivia/TeleStyle",
+  "hugging-apps/id-v2v"
+];
+
+const PROMPT="Convert the entire video into coherent fully 2D illustrated animation. Preserve the source motion, composition, identity, expressions and camera timing. Turn every visible element into 2D artwork: people, faces, hair, clothes, hands, animals, vehicles, objects, buildings, plants, sky, ground, shadows and background. Use clean 2D linework and flat illustrated shapes. No photorealism, no live-action texture, no 3D geometry, no CGI appearance.";
+
+function pickValue(p){
+  const q=((p.component||"")+" "+(p.label||"")).toLowerCase();
+  if(q.includes("video")) return handle_file(input.files[0]);
+  if(q.includes("prompt")||q.includes("description")||q.includes("style")) return PROMPT;
+  if(q.includes("image")||q.includes("frame")||q.includes("reference")) return null;
+  if(q.includes("number")||q.includes("slider")) return p.default ?? 0;
+  if(q.includes("dropdown")) return p.default ?? (p.enum ? p.enum[0] : null);
+  if(q.includes("checkbox")) return p.default ?? false;
+  return p.default ?? null;
+}
+
+function findVideo(x){
+  const s=JSON.stringify(x);
+  const m=s.match(/https?:[^"\\s]+/g)||[];
+  return m.map(v=>v.replace(/\\u0026/g,"&")).find(v=>/\\.(mp4|webm|mov)(\\?|$)/i.test(v));
+}
+
+async function run(space){
+  const app=await Client.connect(space);
+  const info=await app.view_api();
+  const entries=Object.entries(info.named_endpoints||{});
+  if(!entries.length) throw new Error(space+" has no public API endpoint.");
+
+  for(const [api,schema] of entries){
+    const params=schema.parameters||[];
+    if(!params.some(p=>/video/i.test((p.component||"")+" "+(p.label||"")))) continue;
+
+    const payload=params.map(p=>pickValue(p));
+    status.textContent="GPU: "+space+"\nEndpoint: "+api+"\nSubmitting…";
+    const job=app.submit(api,payload);
+    let data=null;
+    for await(const msg of job){
+      if(msg.type==="status") status.textContent="GPU: "+space+"\n"+(msg.stage||"processing")+" "+(msg.message||"");
+      if(msg.type==="data") data=msg.data;
+    }
+    const url=findVideo(data);
+    if(url) return url;
+  }
+  throw new Error(space+" did not expose a compatible video-to-video endpoint.");
+}
+
+go.onclick=async()=>{
+  if(!input.files[0]){status.textContent="Please choose a video first.";return}
+  go.disabled=true;out.hidden=true;download.hidden=true;
+  try{
+    let result=null,last="";
+    for(const space of SPACES){
+      try{ result=await run(space); if(result) break; }
+      catch(e){ last=e.message||String(e); status.textContent="Trying next real GPU route…"; }
+    }
+    if(!result) throw new Error(last||"No real GPU result returned.");
+    out.src=result;out.hidden=false;download.href=result;download.hidden=false;
+    status.textContent="✅ Real GPU output received.";
+  }catch(e){
+    status.textContent="❌ No real 2D output yet. "+(e.message||e);
+  }finally{go.disabled=false}
+};
+</script>
+</body>
+</html>
